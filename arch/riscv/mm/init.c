@@ -36,11 +36,14 @@ static void __init zone_sizes_init(void)
 
 void setup_zero_page(void)
 {
+	pr_info("setup_zero_page()");
 	memset((void *)empty_zero_page, 0, PAGE_SIZE);
+	pr_info("  empty_zero_page=%x, PAGE_SIZE=%x", empty_zero_page, PAGE_SIZE);
 }
 
 void __init paging_init(void)
 {
+	pr_info("paging_init()");
 	setup_zero_page();
 	local_flush_tlb_all();
 	zone_sizes_init();

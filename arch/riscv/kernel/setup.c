@@ -128,26 +128,41 @@ pmd_t trampoline_pmd[PTRS_PER_PGD] __initdata __aligned(PAGE_SIZE);
 
 asmlinkage void __init setup_vm(void)
 {
+	/* 
+#if defined(CONFIG_EARLY_PRINTK)
+       if (likely(early_console == NULL)) {
+               early_console = &riscv_sbi_early_console_dev;
+               register_console(early_console);
+			   pr_info("setup_vm registering early console\n");
+       }
+#endif
+*/
+	//pr_info("setup_vm()\n");
 	extern char _start;
 	uintptr_t i;
-	uintptr_t pa = (uintptr_t) &_start;
+	uintptr_t pa = (uintptr_t) &_start; //physical address
 	pgprot_t prot = __pgprot(pgprot_val(PAGE_KERNEL) | _PAGE_EXEC);
-
+	//pr_info("setup_vm(): (physical_address) pa=%x\n", pa);
 	va_pa_offset = PAGE_OFFSET - pa;
 	pfn_base = PFN_DOWN(pa);
+	//pr_info("setup_vm(): va_pa_offset=%x, pfn_base=%x\n", va_pa_offset, pfn_base);
 
 	/* Sanity check alignment and size */
 	BUG_ON((PAGE_OFFSET % PGDIR_SIZE) != 0);
 	BUG_ON((pa % (PAGE_SIZE * PTRS_PER_PTE)) != 0);
 
+	//pr_info("PAGE_OFFSET=%x, PGDIR_SHIFT=%d, PTRS_PER_PGD=%x PGDIR_SIZE=%x, (-PAGE_OFFSET)/PGDIR_SIZE=%x", PAGE_OFFSET, PGDIR_SHIFT, PTRS_PER_PGD, PGDIR_SIZE, (-PAGE_OFFSET)/PGDIR_SIZE);
 #ifndef __PAGETABLE_PMD_FOLDED
+	pr_info("NOT   __PAGETABLE_PMD_FOLDED");
 	trampoline_pg_dir[(PAGE_OFFSET >> PGDIR_SHIFT) % PTRS_PER_PGD] =
 		pfn_pgd(PFN_DOWN((uintptr_t)trampoline_pmd),
 			__pgprot(_PAGE_TABLE));
 	trampoline_pmd[0] = pfn_pmd(PFN_DOWN(pa), prot);
 
 	for (i = 0; i < (-PAGE_OFFSET)/PGDIR_SIZE; ++i) {
+		pr_info("setup_vm():on page %d", i);
 		size_t o = (PAGE_OFFSET >> PGDIR_SHIFT) % PTRS_PER_PGD + i;
+		pr_info("setup_vm():on page %d, size=%x", o);
 		swapper_pg_dir[o] =
 			pfn_pgd(PFN_DOWN((uintptr_t)swapper_pmd) + i,
 				__pgprot(_PAGE_TABLE));
@@ -155,13 +170,18 @@ asmlinkage void __init setup_vm(void)
 	for (i = 0; i < ARRAY_SIZE(swapper_pmd); i++)
 		swapper_pmd[i] = pfn_pmd(PFN_DOWN(pa + i * PMD_SIZE), prot);
 #else
+	//pr_info("__PAGETABLE_PMD_FOLDED");
 	trampoline_pg_dir[(PAGE_OFFSET >> PGDIR_SHIFT) % PTRS_PER_PGD] =
 		pfn_pgd(PFN_DOWN(pa), prot);
+	//pr_info("setup_vm(): trampoline_pg_dir[%d] = (%x)\n", (PAGE_OFFSET >> PGDIR_SHIFT) % PTRS_PER_PGD, pa);	
 
 	for (i = 0; i < (-PAGE_OFFSET)/PGDIR_SIZE; ++i) {
+		//pr_info("setup_vm():on page %d", i);		
 		size_t o = (PAGE_OFFSET >> PGDIR_SHIFT) % PTRS_PER_PGD + i;
+		//pr_info("setup_vm():on page %d, page=%x", i, o);
 		swapper_pg_dir[o] =
 			pfn_pgd(PFN_DOWN(pa + i * PGDIR_SIZE), prot);
+		//pr_info("setup_vm(): swapper_pg_dir[%d] = (%x)\n",o, pa + i * PGDIR_SIZE);	
 	}
 #endif
 }
@@ -173,27 +193,40 @@ void __init sbi_save(unsigned int hartid, void *dtb)
 
 static void __init setup_bootmem(void)
 {
+	printk(KERN_INFO "setup_bootmem()\n");
 	struct memblock_region *reg;
+
 	phys_addr_t mem_size = 0;
 
 	/* Find the memory region containing the kernel */
+	printk(KERN_INFO "about to iterate through memblocks");
 	for_each_memblock(memory, reg) {
 		phys_addr_t vmlinux_end = __pa(_end);
 		phys_addr_t end = reg->base + reg->size;
+		printk(KERN_INFO "setup_bootmem():vmlinux_end = %x \n", vmlinux_end);
+		printk(KERN_INFO "setup_bootmem():block base %x size %x\n", reg->base, reg->size);
 
 		if (reg->base <= vmlinux_end && vmlinux_end <= end) {
+			printk(KERN_INFO "setup_bootmem(): reg->base <= vmlinux_end && vmlinux_end <= end \n");
 			/*
 			 * Reserve from the start of the region to the end of
 			 * the kernel
 			 */
 			memblock_reserve(reg->base, vmlinux_end - reg->base);
+
+			printk(KERN_INFO "setup_bootmem(): setting mem_size to %x",min(reg->size, (phys_addr_t)-PAGE_OFFSET));
 			mem_size = min(reg->size, (phys_addr_t)-PAGE_OFFSET);
 		}
+		else{
+			printk(KERN_INFO "setup_bootmem(): NOT reg->base <= vmlinux_end && vmlinux_end <= end \n", vmlinux_end);
+		}
 	}
+	printk(KERN_INFO "done with memblocks, mem_size == %llx (%lld)\n", mem_size, mem_size);
 	BUG_ON(mem_size == 0);
 
 	set_max_mapnr(PFN_DOWN(mem_size));
 	max_low_pfn = memblock_end_of_DRAM();
+	pr_info("setup_bootmem(): max_low_pfn=%lx", max_low_pfn);
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	setup_initrd();
@@ -201,12 +234,16 @@ static void __init setup_bootmem(void)
 
 	early_init_fdt_reserve_self();
 	early_init_fdt_scan_reserved_mem();
+
+	pr_info("setup_bootmem(): memblock_allow_resize");
 	memblock_allow_resize();
+	pr_info("setup_bootmem(): memblock_dump_all");
 	memblock_dump_all();
 
-	for_each_memblock(memory, reg) {
+	for_each_memblock(memory, reg) {		
 		unsigned long start_pfn = memblock_region_memory_base_pfn(reg);
 		unsigned long end_pfn = memblock_region_memory_end_pfn(reg);
+		pr_info("setup_bootmem(): for_each_memblock - start_pfn=%lx end_pfn=%lx", start_pfn, end_pfn);
 
 		memblock_set_node(PFN_PHYS(start_pfn),
 		                  PFN_PHYS(end_pfn - start_pfn),
@@ -220,10 +257,14 @@ void __init setup_arch(char **cmdline_p)
        if (likely(early_console == NULL)) {
                early_console = &riscv_sbi_early_console_dev;
                register_console(early_console);
+			   pr_info("setup_arch registering early console\n");
        }
 #endif
+	printk(KERN_INFO "setup_arch()");
+
 	*cmdline_p = boot_command_line;
 
+	printk(KERN_INFO "before parse_early_param");
 	parse_early_param();
 
 	init_mm.start_code = (unsigned long) _stext;
@@ -231,10 +272,16 @@ void __init setup_arch(char **cmdline_p)
 	init_mm.end_data   = (unsigned long) _edata;
 	init_mm.brk        = (unsigned long) _end;
 
+	printk(KERN_INFO "setup_arch(): init_mm start_code:%lx end_code:%lx end_data:%lx", init_mm.start_code, init_mm.end_code, init_mm.end_data);
 	setup_bootmem();
+
+	pr_info("setup_arch() before paging_init");
 	paging_init();
+
+	pr_info("setup_arch() before unflatten_device_tree");
 	unflatten_device_tree();
 
+	pr_info("setup_arch(): swiotlb_init(1)\n");
 	swiotlb_init(1);
 
 #ifdef CONFIG_SMP
@@ -242,9 +289,11 @@ void __init setup_arch(char **cmdline_p)
 #endif
 
 #ifdef CONFIG_DUMMY_CONSOLE
+	pr_info("setup_arch(): CONFIG_DUMMY_CONSOLE\n");
 	conswitchp = &dummy_con;
 #endif
 
+	pr_info("setup_arch(): riscv_fill_hwcap\n");
 	riscv_fill_hwcap();
 }
 
