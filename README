@@ -1,3 +1,17 @@
+Build instructions for emuriscv
+===============================
+
+1. compile and build riscv-gnu-toolchain for rv32ima
+2. set up environment variables
+- `export RISCV=/opt/riscv32`
+- `export PATH=$PATH:$RISCV/bin`
+- `export CCPREFIX=riscv32-unknown-linux-gnu-`
+3. prepare configuration
+- `make ARCH=riscv CROSS_COMPILE=$CCPREFIX defconfig`
+- `make ARCH=riscv CROSS_COMPILE=$CCPREFIX nconfig`
+4. build
+- `make ARCH=riscv CROSS_COMPILE=$CCPREFIX vmlinux`
+
 Linux kernel
 ============
 
